@@ -40,13 +40,99 @@ void AWeather::CheckWeatherPostProcessEffects()
     else
         ActiveBlendables.Remove(DustStormPostProcessMaterial);
 
-    TArray<AActor*> SensorActors;
-    UGameplayStatics::GetAllActorsOfClass(GetWorld(), ASceneCaptureCamera::StaticClass(), SensorActors);
-    for (AActor* SensorActor : SensorActors)
+    // Iterate the cached camera list maintained via OnActorSpawned /
+    // OnActorDestroyed. Avoids an O(N_all_actors) UE scene walk every time
+    // the weather changes.
+    for (int32 Index = CachedCameras.Num() - 1; Index >= 0; --Index)
     {
-        ASceneCaptureCamera* Sensor = Cast<ASceneCaptureCamera>(SensorActor);
-        for (auto& ActiveBlendable : ActiveBlendables)
-            Sensor->GetCaptureComponent2D()->PostProcessSettings.AddBlendable(ActiveBlendable.Key, ActiveBlendable.Value);
+        ASceneCaptureCamera *Sensor = CachedCameras[Index].Get();
+        if (!Sensor)
+        {
+            CachedCameras.RemoveAtSwap(Index);
+            continue;
+        }
+        USceneCaptureComponent2D *Capture = Sensor->GetCaptureComponent2D();
+        if (!Capture)
+        {
+            continue;
+        }
+        for (const auto &ActiveBlendable : ActiveBlendables)
+        {
+            Capture->PostProcessSettings.AddBlendable(ActiveBlendable.Key, ActiveBlendable.Value);
+        }
+    }
+}
+
+void AWeather::BeginPlay()
+{
+    Super::BeginPlay();
+
+    UWorld *World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    TArray<AActor *> ExistingCameras;
+    UGameplayStatics::GetAllActorsOfClass(World, ASceneCaptureCamera::StaticClass(), ExistingCameras);
+    CachedCameras.Reserve(ExistingCameras.Num());
+    for (AActor *Actor : ExistingCameras)
+    {
+        if (ASceneCaptureCamera *Camera = Cast<ASceneCaptureCamera>(Actor))
+        {
+            CachedCameras.AddUnique(TWeakObjectPtr<ASceneCaptureCamera>(Camera));
+        }
+    }
+
+    OnActorSpawnedHandle = World->AddOnActorSpawnedHandler(
+        FOnActorSpawned::FDelegate::CreateUObject(this, &AWeather::OnAnyActorSpawned));
+    OnActorDestroyedHandle = World->AddOnActorDestroyedHandler(
+        FOnActorDestroyed::FDelegate::CreateUObject(this, &AWeather::OnAnyActorDestroyed));
+}
+
+void AWeather::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld *World = GetWorld())
+    {
+        if (OnActorSpawnedHandle.IsValid())
+        {
+            World->RemoveOnActorSpawnedHandler(OnActorSpawnedHandle);
+        }
+        if (OnActorDestroyedHandle.IsValid())
+        {
+            World->RemoveOnActorDestroyedHandler(OnActorDestroyedHandle);
+        }
+    }
+    OnActorSpawnedHandle.Reset();
+    OnActorDestroyedHandle.Reset();
+    CachedCameras.Reset();
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void AWeather::OnAnyActorSpawned(AActor *Actor)
+{
+    ASceneCaptureCamera *Camera = Cast<ASceneCaptureCamera>(Actor);
+    if (!Camera)
+    {
+        return;
+    }
+    CachedCameras.AddUnique(TWeakObjectPtr<ASceneCaptureCamera>(Camera));
+}
+
+void AWeather::OnAnyActorDestroyed(AActor *Actor)
+{
+    ASceneCaptureCamera *Camera = Cast<ASceneCaptureCamera>(Actor);
+    if (!Camera)
+    {
+        return;
+    }
+    for (int32 Index = CachedCameras.Num() - 1; Index >= 0; --Index)
+    {
+        if (CachedCameras[Index].Get() == Camera)
+        {
+            CachedCameras.RemoveAtSwap(Index);
+        }
     }
 }
 

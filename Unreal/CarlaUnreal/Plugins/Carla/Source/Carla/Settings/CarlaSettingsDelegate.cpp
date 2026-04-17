@@ -96,34 +96,30 @@ void UCarlaSettingsDelegate::ApplyQualityLevelPostRestart()
   {
     case EQualityLevel::Low:
     {
-      // execute tweaks for quality
       LaunchLowQualityCommands(InWorld);
-      // iterate all directional lights, deactivate shadows
-      SetAllLights(InWorld, CarlaSettings->LowLightFadeDistance, false, true);
-      // Set all the roads the low quality materials
       SetAllRoads(InWorld, CarlaSettings->LowRoadPieceMeshMaxDrawDistance, CarlaSettings->LowRoadMaterials);
-      // Set all actors with static meshes a max disntace configured in the
-      // global settings for the low quality
-      SetAllActorsDrawDistance(InWorld, CarlaSettings->LowStaticMeshMaxDrawDistance);
-      // Disable all post process volumes
+      ApplyPerActorQualitySettings(
+          InWorld,
+          CarlaSettings->LowLightFadeDistance,
+          false,
+          true,
+          CarlaSettings->LowStaticMeshMaxDrawDistance);
       SetPostProcessEffectsEnabled(InWorld, false);
       break;
     }
     case EQualityLevel::Medium:
     {
       LaunchMediumQualityCommands(InWorld);
-      SetAllLights(InWorld, 0.0f, true, false);
       SetAllRoads(InWorld, 0, CarlaSettings->EpicRoadMaterials);
-      SetAllActorsDrawDistance(InWorld, 0);
+      ApplyPerActorQualitySettings(InWorld, 0.0f, true, false, 0);
       SetPostProcessEffectsEnabled(InWorld, true);
       break;
     }
     case EQualityLevel::High:
     {
       LaunchHighQualityCommands(InWorld);
-      SetAllLights(InWorld, 0.0f, true, false);
       SetAllRoads(InWorld, 0, CarlaSettings->EpicRoadMaterials);
-      SetAllActorsDrawDistance(InWorld, 0);
+      ApplyPerActorQualitySettings(InWorld, 0.0f, true, false, 0);
       SetPostProcessEffectsEnabled(InWorld, true);
       break;
     }
@@ -132,9 +128,8 @@ void UCarlaSettingsDelegate::ApplyQualityLevelPostRestart()
     case EQualityLevel::Epic:
     {
       LaunchEpicQualityCommands(InWorld);
-      SetAllLights(InWorld, 0.0f, true, false);
       SetAllRoads(InWorld, 0, CarlaSettings->EpicRoadMaterials);
-      SetAllActorsDrawDistance(InWorld, 0);
+      ApplyPerActorQualitySettings(InWorld, 0.0f, true, false, 0);
       SetPostProcessEffectsEnabled(InWorld, true);
       break;
     }
@@ -535,4 +530,55 @@ void UCarlaSettingsDelegate::SetAllLights(
     }
   });
 
+}
+
+void UCarlaSettingsDelegate::ApplyPerActorQualitySettings(
+    UWorld *world,
+    const float light_fade_distance,
+    const bool cast_directional_shadows,
+    const bool hide_non_directional_lights,
+    const float draw_distance) const
+{
+  if (!IsValid(world))
+  {
+    return;
+  }
+  AsyncTask(ENamedThreads::GameThread, [=, this]() {
+    if (!IsValid(world))
+    {
+      return;
+    }
+    TArray<AActor *> actors;
+    UGameplayStatics::GetAllActorsOfClass(world, AActor::StaticClass(), actors);
+    for (int32 i = 0; i < actors.Num(); i++)
+    {
+      AActor *actor = actors[i];
+      if (!IsValid(actor))
+      {
+        continue;
+      }
+
+      if (ADirectionalLight *directional = Cast<ADirectionalLight>(actor))
+      {
+        directional->SetCastShadows(cast_directional_shadows);
+        directional->SetLightFunctionFadeDistance(light_fade_distance);
+        continue;
+      }
+      if (actor->IsA<ALight>())
+      {
+        actor->SetActorHiddenInGame(hide_non_directional_lights);
+        continue;
+      }
+
+      if (actor->IsA<AInstancedFoliageActor>() ||
+          actor->IsA<ALandscape>() ||
+          actor->ActorHasTag(UCarlaSettings::CARLA_ROAD_TAG) ||
+          actor->ActorHasTag(UCarlaSettings::CARLA_SKY_TAG))
+      {
+        continue;
+      }
+
+      SetActorComponentsDrawDistance(actor, draw_distance);
+    }
+  });
 }

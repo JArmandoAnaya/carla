@@ -86,6 +86,16 @@ private:
       bool cast_shadows,
       bool hide_non_directional) const;
 
+  /// Single-pass replacement for SetAllLights + SetAllActorsDrawDistance
+  /// when applying a quality tier. Walks the actor list once and dispatches
+  /// per-type, halving the cost of a tier change.
+  void ApplyPerActorQualitySettings(
+      UWorld *world,
+      float light_fade_distance,
+      bool cast_directional_shadows,
+      bool hide_non_directional_lights,
+      float draw_distance) const;
+
 private:
 
   /// Currently applied quality level after level is restarted.

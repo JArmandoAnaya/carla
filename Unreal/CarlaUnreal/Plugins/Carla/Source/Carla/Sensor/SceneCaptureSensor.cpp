@@ -76,7 +76,6 @@ ASceneCaptureSensor::ASceneCaptureSensor(const FObjectInitializer &ObjectInitial
   CaptureRenderTarget->CompressionSettings = TextureCompressionSettings::TC_Default;
   CaptureRenderTarget->SRGB = false;
   CaptureRenderTarget->bAutoGenerateMips = false;
-  CaptureRenderTarget->bGPUSharedFlag = true;
   CaptureRenderTarget->AddressX = TextureAddress::TA_Clamp;
   CaptureRenderTarget->AddressY = TextureAddress::TA_Clamp;
 
@@ -88,7 +87,10 @@ ASceneCaptureSensor::ASceneCaptureSensor(const FObjectInitializer &ObjectInitial
   CaptureComponent2D->PrimitiveRenderMode = ESceneCapturePrimitiveRenderMode::PRM_RenderScenePrimitives;
   CaptureComponent2D->bCaptureOnMovement = false;
   CaptureComponent2D->bCaptureEveryFrame = false;
-  CaptureComponent2D->bAlwaysPersistRenderingState = true;
+  // TSR/Lumen history persistence costs 150-300 MiB/camera. Subclasses that
+  // benefit from temporal history (RGB + optical flow) flip this back on in
+  // their own constructor.
+  CaptureComponent2D->bAlwaysPersistRenderingState = false;
   ApplyRayTracingSetting();
 
   SceneCaptureSensor_local_ns::SetCameraDefaultOverrides(*CaptureComponent2D);
@@ -940,11 +942,6 @@ void ASceneCaptureSensor::BeginPlay()
   CaptureComponent2D->UpdateContent();
   CaptureComponent2D->Activate();
 
-  // Make sure that there is enough time in the render queue.
-  UKismetSystemLibrary::ExecuteConsoleCommand(
-      GetWorld(),
-      FString("g.TimeoutForBlockOnRenderFence 300000"));
-
   auto PostProcessConfig = FPostProcessConfig(
       CaptureComponent2D->PostProcessSettings,
       CaptureComponent2D->ShowFlags);
@@ -966,30 +963,82 @@ void ASceneCaptureSensor::BeginPlay()
   Super::BeginPlay();
 }
 
+bool ASceneCaptureSensor::IsAnyGBufferClientListening() const
+{
+#ifdef CARLA_HAS_GBUFFER_API
+  const auto HasListener = [](const auto &GBufferEntry)
+  {
+    return GBufferEntry.Stream.AreClientsListening();
+  };
+  const auto &GBuffers = CameraGBuffers;
+  return
+      HasListener(GBuffers.SceneColor) ||
+      HasListener(GBuffers.SceneDepth) ||
+      HasListener(GBuffers.SceneStencil) ||
+      HasListener(GBuffers.GBufferA) ||
+      HasListener(GBuffers.GBufferB) ||
+      HasListener(GBuffers.GBufferC) ||
+      HasListener(GBuffers.GBufferD) ||
+      HasListener(GBuffers.GBufferE) ||
+      HasListener(GBuffers.GBufferF) ||
+      HasListener(GBuffers.Velocity) ||
+      HasListener(GBuffers.SSAO) ||
+      HasListener(GBuffers.CustomDepth) ||
+      HasListener(GBuffers.CustomStencil);
+#else
+  return false;
+#endif
+}
+
+bool ASceneCaptureSensor::ShouldCaptureThisFrame()
+{
+  if (CVarCarlaCameraForceAllGBuffers.GetValueOnAnyThread() > 0)
+  {
+    return true;
+  }
+  return AreClientsListening() || IsAnyGBufferClientListening();
+}
+
 void ASceneCaptureSensor::PrePhysTick(float DeltaSeconds)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(ASceneCaptureSensor::PrePhysTick);
   Super::PrePhysTick(DeltaSeconds);
 
-  // Add the view information every tick. It's only used for one tick and then
-  // removed by the streamer.
+  if (!ShouldCaptureThisFrame())
+  {
+    return;
+  }
+
+  const float FOVRadians = FMath::DegreesToRadians(CaptureComponent2D->FOVAngle);
+  const float HalfTan = FMath::Tan(0.5f * FOVRadians);
+  const float StreamingBoundingRadius =
+      HalfTan > 0.0f ? ImageWidth / HalfTan : static_cast<float>(ImageWidth);
   IStreamingManager::Get().AddViewInformation(
       CaptureComponent2D->GetComponentLocation(),
       ImageWidth,
-      ImageWidth / FMath::Tan(CaptureComponent2D->FOVAngle));
+      StreamingBoundingRadius);
 }
 
 void ASceneCaptureSensor::PostPhysTick(UWorld *World, ELevelTick TickType, float DeltaTime)
 {
   TRACE_CPUPROFILER_EVENT_SCOPE(ASceneCaptureSensor::PostPhysTick);
   Super::PostPhysTick(World, TickType, DeltaTime);
+
+  if (!ShouldCaptureThisFrame())
+  {
+    return;
+  }
   EnqueueRenderSceneImmediate();
 }
 
 void ASceneCaptureSensor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
   Super::EndPlay(EndPlayReason);
-  FlushRenderingCommands();
+
+  if (CaptureRenderTarget)
+  {
+    CaptureRenderTarget->ReleaseResource();
+  }
   SCENE_CAPTURE_COUNTER = 0u;
 }
 
@@ -1055,25 +1104,10 @@ void ASceneCaptureSensor::CaptureSceneExtended()
   Prior = GBufferPtr->DesiredTexturesMask;
   GBufferPtr->OwningActor = CaptureComponent2D->GetViewOwner();
 
-#define CARLA_GBUFFER_DISABLE_TAA // Temporarily disable TAA to avoid jitter.
-
-#ifdef CARLA_GBUFFER_DISABLE_TAA
-  bool bTAA = CaptureComponent2D->ShowFlags.TemporalAA;
-  if (bTAA)
-  {
-    CaptureComponent2D->ShowFlags.TemporalAA = false;
-  }
-#endif
-
+  // Flipping ShowFlags.TemporalAA per-frame (pre-UE5 workaround) destroys the
+  // TSR history every capture. Leave temporal state alone; users needing
+  // jitter-free GBuffer output can set r.AntiAliasingMethod 2 (FXAA) globally.
   CaptureComponent2D->CaptureSceneWithGBuffer(GBuffer);
-
-#ifdef CARLA_GBUFFER_DISABLE_TAA
-  if (bTAA)
-  {
-    CaptureComponent2D->ShowFlags.TemporalAA = true;
-  }
-#undef CARLA_GBUFFER_DISABLE_TAA
-#endif
 
   AsyncTask(ENamedThreads::AnyHiPriThreadNormalTask, [this, GBuffer = MoveTemp(GBufferPtr)]() mutable
             { SendGBufferTextures(*GBuffer); });

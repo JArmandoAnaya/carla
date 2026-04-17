@@ -60,12 +60,18 @@ protected:
   virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
+  virtual void BeginPlay() override;
+  virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
   UFUNCTION(BlueprintImplementableEvent)
   void RefreshWeather(const FWeatherParameters &WeatherParameters);
 
 private:
 
   void CheckWeatherPostProcessEffects();
+
+  void OnAnyActorSpawned(AActor *Actor);
+  void OnAnyActorDestroyed(AActor *Actor);
 
   UPROPERTY(EditAnywhere, Category="Parameters")
   FWeatherParameters Weather;
@@ -78,4 +84,8 @@ private:
 
   UPROPERTY(EditAnywhere, Category = "Weather")
   bool DayNightCycle = true;
+
+  TArray<TWeakObjectPtr<ASceneCaptureCamera>> CachedCameras;
+  FDelegateHandle OnActorSpawnedHandle;
+  FDelegateHandle OnActorDestroyedHandle;
 };

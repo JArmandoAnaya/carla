@@ -629,6 +629,14 @@ protected:
   UPROPERTY(EditAnywhere)
   bool bEnable16BitFormat = false;
 
+  /// Returns true if any GBuffer stream has an active listener.
+  bool IsAnyGBufferClientListening() const;
+
+  /// Aggregate gate: main stream or any GBuffer stream has listeners,
+  /// or CVarCarlaCameraForceAllGBuffers forces every frame.
+  /// Non-const because ASensor::AreClientsListening() is non-const.
+  bool ShouldCaptureThisFrame();
+
 private:
   void ApplyRayTracingSetting();
 
