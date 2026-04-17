@@ -162,6 +162,15 @@ public:
   }
 
   UFUNCTION(BlueprintCallable)
+  void SetUseRayTracing(bool Enable);
+
+  UFUNCTION(BlueprintCallable)
+  bool GetUseRayTracing() const
+  {
+    return bUseRayTracing;
+  }
+
+  UFUNCTION(BlueprintCallable)
   void Enable16BitFormat(bool Enable = false)
   {
     bEnable16BitFormat = Enable;
@@ -609,11 +618,20 @@ protected:
   UPROPERTY(EditAnywhere)
   bool bEnablePostProcessingEffects = true;
 
+  /// Whether this sensor uses hardware ray tracing for its scene capture.
+  /// Disabled by default to bound VRAM; costs ~700 MiB-1 GiB per camera when
+  /// enabled. Requires r.RayTracing and r.Lumen.HardwareRayTracing to be set
+  /// globally for any effect. Override globally with carla.Camera.UseRayTracing.
+  UPROPERTY(EditAnywhere)
+  bool bUseRayTracing = false;
+
   /// Whether to change render target format to PF_A16B16G16R16, offering 16bit / channel
   UPROPERTY(EditAnywhere)
   bool bEnable16BitFormat = false;
 
 private:
+  void ApplyRayTracingSetting();
+
 #ifdef CARLA_HAS_GBUFFER_API
   template <
       typename SensorT,

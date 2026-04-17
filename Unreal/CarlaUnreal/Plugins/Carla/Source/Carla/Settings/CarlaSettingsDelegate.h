@@ -62,6 +62,12 @@ private:
   /// Execute engine commands to apply the low quality level to the world.
   void LaunchLowQualityCommands(UWorld *world) const;
 
+  /// Execute engine commands to apply the medium quality level to the world.
+  void LaunchMediumQualityCommands(UWorld *world) const;
+
+  /// Execute engine commands to apply the high quality level to the world.
+  void LaunchHighQualityCommands(UWorld *world) const;
+
   void SetAllRoads(
       UWorld *world,
       float max_draw_distance,

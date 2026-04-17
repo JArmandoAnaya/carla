@@ -21,6 +21,27 @@
 
 static int SCENE_CAPTURE_COUNTER = 0u;
 
+static TAutoConsoleVariable<int32> CVarCarlaCameraUseRayTracing(
+    TEXT("carla.Camera.UseRayTracing"),
+    -1,
+    TEXT("Global override for per-camera hardware ray-tracing on CARLA sensors.\n")
+    TEXT("  -1: Respect the per-sensor bUseRayTracing attribute (default).\n")
+    TEXT("   0: Force ray-tracing OFF on every camera.\n")
+    TEXT("   1: Force ray-tracing ON on every camera."),
+    ECVF_Default);
+
+// Rollback / debug switch for the lazy GBuffer capture path. GBuffer captures
+// are only allocated when a client subscribes via listen_to_gbuffer(); setting
+// this to 1 forces every frame to request the full GBuffer set regardless of
+// subscription, matching the pre-refactor behavior.
+static TAutoConsoleVariable<int32> CVarCarlaCameraForceAllGBuffers(
+    TEXT("carla.Camera.ForceAllGBuffers"),
+    0,
+    TEXT("Force CARLA scene-capture cameras to request every GBuffer texture\n")
+    TEXT("each frame, irrespective of client subscription. Intended as a\n")
+    TEXT("one-release rollback path; default is 0 (lazy, by subscription)."),
+    ECVF_Default);
+
 // =============================================================================
 // -- Local static methods -----------------------------------------------------
 // =============================================================================
@@ -68,7 +89,7 @@ ASceneCaptureSensor::ASceneCaptureSensor(const FObjectInitializer &ObjectInitial
   CaptureComponent2D->bCaptureOnMovement = false;
   CaptureComponent2D->bCaptureEveryFrame = false;
   CaptureComponent2D->bAlwaysPersistRenderingState = true;
-  CaptureComponent2D->bUseRayTracingIfEnabled = true;
+  ApplyRayTracingSetting();
 
   SceneCaptureSensor_local_ns::SetCameraDefaultOverrides(*CaptureComponent2D);
 
@@ -85,6 +106,23 @@ void ASceneCaptureSensor::SetImageSize(uint32 InWidth, uint32 InHeight)
 {
   ImageWidth = InWidth;
   ImageHeight = InHeight;
+}
+
+void ASceneCaptureSensor::SetUseRayTracing(bool Enable)
+{
+  bUseRayTracing = Enable;
+  ApplyRayTracingSetting();
+}
+
+void ASceneCaptureSensor::ApplyRayTracingSetting()
+{
+  if (CaptureComponent2D == nullptr)
+  {
+    return;
+  }
+  const int32 CVarOverride = CVarCarlaCameraUseRayTracing.GetValueOnAnyThread();
+  const bool bEffective = (CVarOverride < 0) ? bUseRayTracing : (CVarOverride > 0);
+  CaptureComponent2D->bUseRayTracingIfEnabled = bEffective;
 }
 
 void ASceneCaptureSensor::SetFOVAngle(const float FOVAngle)
@@ -977,7 +1015,8 @@ constexpr const TCHAR *GBufferNames[] =
 template <EGBufferTextureID ID, typename T>
 static void CheckGBufferStream(T &GBufferStream, FGBufferRequest &GBuffer)
 {
-  GBufferStream.bIsUsed = GBufferStream.Stream.AreClientsListening();
+  const bool bForceAll = CVarCarlaCameraForceAllGBuffers.GetValueOnAnyThread() > 0;
+  GBufferStream.bIsUsed = bForceAll || GBufferStream.Stream.AreClientsListening();
   if (GBufferStream.bIsUsed)
     GBuffer.MarkAsRequested(ID);
 }
@@ -1112,7 +1151,6 @@ namespace SceneCaptureSensor_local_ns
     PostProcessSettings.bOverride_LocalExposureHighlightContrastScale = true;
     PostProcessSettings.bOverride_LocalExposureShadowContrastScale = true;
 
-    CaptureComponent2D.bUseRayTracingIfEnabled = true;
     PostProcessSettings.bOverride_DynamicGlobalIlluminationMethod = true;
     PostProcessSettings.DynamicGlobalIlluminationMethod = EDynamicGlobalIlluminationMethod::Lumen;
     PostProcessSettings.bOverride_LumenSceneLightingQuality = true;

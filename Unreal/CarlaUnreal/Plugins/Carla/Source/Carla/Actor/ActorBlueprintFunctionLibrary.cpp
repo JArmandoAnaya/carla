@@ -377,6 +377,15 @@ void UActorBlueprintFunctionLibrary::MakeCameraDefinition(
   LensYSize.RecommendedValues = {TEXT("0.08")};
   LensYSize.bRestrictToRecommended = false;
 
+  // Per-sensor hardware ray-tracing opt-in. Defaults to false to keep VRAM
+  // within the 8-10 GB envelope targeted on 1-3 camera scenarios. The global
+  // CVar carla.Camera.UseRayTracing can force this on or off for every camera.
+  FActorVariation UseRayTracing;
+  UseRayTracing.Id = TEXT("use_ray_tracing");
+  UseRayTracing.Type = EActorAttributeType::Bool;
+  UseRayTracing.RecommendedValues = {TEXT("false")};
+  UseRayTracing.bRestrictToRecommended = false;
+
   Definition.Variations.Append({ResX,
                                 ResY,
                                 FOV,
@@ -385,7 +394,8 @@ void UActorBlueprintFunctionLibrary::MakeCameraDefinition(
                                 LensK,
                                 LensKcube,
                                 LensXSize,
-                                LensYSize});
+                                LensYSize,
+                                UseRayTracing});
 
   if (bEnableModifyingPostProcessEffects)
   {
@@ -1366,6 +1376,13 @@ void UActorBlueprintFunctionLibrary::SetCamera(
       RetrieveActorAttributeToInt("image_size_y", Description.Variations, 600));
   Camera->SetFOVAngle(
       RetrieveActorAttributeToFloat("fov", Description.Variations, 90.0f));
+  if (Description.Variations.Contains("use_ray_tracing"))
+  {
+    Camera->SetUseRayTracing(
+        ActorAttributeToBool(
+            Description.Variations["use_ray_tracing"],
+            false));
+  }
   if (Description.Variations.Contains("enable_postprocess_effects"))
   {
     Camera->EnablePostProcessingEffects(
