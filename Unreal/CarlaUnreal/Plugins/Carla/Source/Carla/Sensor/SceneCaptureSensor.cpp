@@ -1082,6 +1082,17 @@ static uint64 Prior = 0;
 
 void ASceneCaptureSensor::CaptureSceneExtended()
 {
+  // Fast path: no GBuffer client subscribed (and the force-all CVar off)
+  // means every CheckGBufferStream below would no-op and we would fall
+  // through to CaptureScene() anyway. Skip the per-frame FGBufferRequest
+  // allocation and the 13 stream-listener checks. (Bundle 5a)
+  if (!IsAnyGBufferClientListening() &&
+      CVarCarlaCameraForceAllGBuffers.GetValueOnAnyThread() <= 0)
+  {
+    CaptureComponent2D->CaptureScene();
+    return;
+  }
+
   auto GBufferPtr = MakeUnique<FGBufferRequest>();
   auto &GBuffer = *GBufferPtr;
 
