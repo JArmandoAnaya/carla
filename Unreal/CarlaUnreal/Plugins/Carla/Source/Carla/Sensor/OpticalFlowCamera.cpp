@@ -45,8 +45,8 @@ void AOpticalFlowCamera::PostPhysTick(UWorld *World, ELevelTick TickType, float 
   }
 
   const auto FrameIndex = FCarlaEngine::GetFrameCounter();
-  ImageUtil::ReadImageDataAsync(
-      *GetCaptureRenderTarget(),
+  ImageUtil::ReadSensorImageDataAsync(
+      *this,
       [this, FrameIndex](
           const void* MappedPtr,
           size_t RowPitch,

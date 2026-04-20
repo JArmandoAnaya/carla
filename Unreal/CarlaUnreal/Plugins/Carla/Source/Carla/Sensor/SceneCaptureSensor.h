@@ -7,6 +7,7 @@
 #pragma once
 
 #include "Carla/Sensor/PixelReader.h"
+#include "Carla/Sensor/RHIGPUReadbackPool.h"
 #include "Carla/Sensor/Sensor.h"
 #include "Carla/Sensor/UE4_Overridden/SceneCaptureComponent2D_CARLA.h"
 #include "Carla/Sensor/ImageUtil.h"
@@ -549,6 +550,11 @@ public:
     return CaptureRenderTarget;
   }
 
+  /// Per-sensor pool of recyclable RHI readback objects. May be null before
+  /// BeginPlay or after EndPlay; consumers fall back to a per-call alloc in
+  /// that case. (Bundle 5b)
+  FRHIGPUReadbackPoolPtr GetReadbackPool() const { return ReadbackPool; }
+
   /// Immediate enqueues render commands of the scene at the current time.
   void EnqueueRenderSceneImmediate();
 
@@ -628,6 +634,11 @@ protected:
   /// Whether to change render target format to PF_A16B16G16R16, offering 16bit / channel
   UPROPERTY(EditAnywhere)
   bool bEnable16BitFormat = false;
+
+  /// Per-sensor pool of recyclable RHI readback objects. Created in BeginPlay,
+  /// dropped in EndPlay; outstanding AsyncTasks keep it alive via shared
+  /// ownership. (Bundle 5b)
+  FRHIGPUReadbackPoolPtr ReadbackPool;
 
   /// Returns true if any GBuffer stream has an active listener.
   bool IsAnyGBufferClientListening() const;

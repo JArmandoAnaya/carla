@@ -966,6 +966,9 @@ void ASceneCaptureSensor::BeginPlay()
   if (Weather != nullptr)
     Weather->NotifyWeather(this);
 
+  ReadbackPool = MakeShared<FRHIGPUReadbackPool, ESPMode::ThreadSafe>(
+      TEXT("SceneCaptureReadback"));
+
   Super::BeginPlay();
 }
 
@@ -1045,6 +1048,9 @@ void ASceneCaptureSensor::EndPlay(const EEndPlayReason::Type EndPlayReason)
   {
     CaptureRenderTarget->ReleaseResource();
   }
+  // Drop the sensor's strong ref. Any in-flight AsyncTask still holds a copy
+  // of the shared_ptr, so the pool dies with the last consuming task. (Bundle 5b)
+  ReadbackPool.Reset();
   // SCENE_CAPTURE_COUNTER intentionally not reset: monotonic across the
   // process lifetime so subobject names assigned to the next sensor do not
   // collide with any sibling sensor still alive on that suffix.
