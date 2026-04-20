@@ -76,11 +76,14 @@ private:
   UPROPERTY(EditAnywhere, Category="Parameters")
   FWeatherParameters Weather;
 
-  UMaterial* PrecipitationPostProcessMaterial;
+  UPROPERTY()
+  TObjectPtr<UMaterial> PrecipitationPostProcessMaterial;
 
-  UMaterial* DustStormPostProcessMaterial;
+  UPROPERTY()
+  TObjectPtr<UMaterial> DustStormPostProcessMaterial;
 
-  TMap<UMaterial*, float> ActiveBlendables;
+  UPROPERTY()
+  TMap<TObjectPtr<UMaterial>, float> ActiveBlendables;
 
   UPROPERTY(EditAnywhere, Category = "Weather")
   bool DayNightCycle = true;

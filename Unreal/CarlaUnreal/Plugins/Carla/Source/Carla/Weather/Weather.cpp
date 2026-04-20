@@ -30,19 +30,24 @@ AWeather::AWeather(const FObjectInitializer& ObjectInitializer)
 
 void AWeather::CheckWeatherPostProcessEffects()
 {
+    // Compute the new desired blendable set first.
+    TMap<TObjectPtr<UMaterial>, float> DesiredBlendables;
     if (Weather.Precipitation > 0.0f)
-        ActiveBlendables.Add(MakeTuple(PrecipitationPostProcessMaterial, Weather.Precipitation / 100.0f));
-    else
-        ActiveBlendables.Remove(PrecipitationPostProcessMaterial);
-
+    {
+        DesiredBlendables.Add(PrecipitationPostProcessMaterial, Weather.Precipitation / 100.0f);
+    }
     if (Weather.DustStorm > 0.0f)
-        ActiveBlendables.Add(MakeTuple(DustStormPostProcessMaterial, Weather.DustStorm / 100.0f));
-    else
-        ActiveBlendables.Remove(DustStormPostProcessMaterial);
+    {
+        DesiredBlendables.Add(DustStormPostProcessMaterial, Weather.DustStorm / 100.0f);
+    }
 
-    // Iterate the cached camera list maintained via OnActorSpawned /
-    // OnActorDestroyed. Avoids an O(N_all_actors) UE scene walk every time
-    // the weather changes.
+    // Apply the diff to every cached camera. Iterate the cached camera list
+    // maintained via OnActorSpawned / OnActorDestroyed (avoids an
+    // O(N_all_actors) UE scene walk every weather change). Remove each
+    // previously-active blendable before re-adding the currently-desired set:
+    // this both removes blendables that are no longer active (e.g. when
+    // precipitation drops to 0) and keeps PostProcessSettings.WeightedBlendables
+    // bounded across repeated weather updates.
     for (int32 Index = CachedCameras.Num() - 1; Index >= 0; --Index)
     {
         ASceneCaptureCamera *Sensor = CachedCameras[Index].Get();
@@ -56,11 +61,18 @@ void AWeather::CheckWeatherPostProcessEffects()
         {
             continue;
         }
-        for (const auto &ActiveBlendable : ActiveBlendables)
+        for (const auto &PreviouslyActive : ActiveBlendables)
         {
-            Capture->PostProcessSettings.AddBlendable(ActiveBlendable.Key, ActiveBlendable.Value);
+            Capture->PostProcessSettings.RemoveBlendable(PreviouslyActive.Key);
+        }
+        for (const auto &Desired : DesiredBlendables)
+        {
+            Capture->PostProcessSettings.AddBlendable(Desired.Key, Desired.Value);
         }
     }
+
+    // Persist the new active set as the canonical state for the next call.
+    ActiveBlendables = MoveTemp(DesiredBlendables);
 }
 
 void AWeather::BeginPlay()

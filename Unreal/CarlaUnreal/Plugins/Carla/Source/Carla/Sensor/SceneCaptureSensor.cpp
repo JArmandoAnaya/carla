@@ -19,7 +19,11 @@
 #include <atomic>
 #include <thread>
 
-static int SCENE_CAPTURE_COUNTER = 0u;
+// Monotonic across the process lifetime so subobject names assigned to
+// CaptureRenderTarget / USceneCaptureComponent2D never collide on respawn.
+// Atomic so concurrent sensor construction (rare but possible during world
+// load) cannot hand out the same index twice.
+static std::atomic<int> SCENE_CAPTURE_COUNTER{0};
 
 static TAutoConsoleVariable<int32> CVarCarlaCameraUseRayTracing(
     TEXT("carla.Camera.UseRayTracing"),
@@ -71,8 +75,12 @@ ASceneCaptureSensor::ASceneCaptureSensor(const FObjectInitializer &ObjectInitial
   PrimaryActorTick.bCanEverTick = true;
   PrimaryActorTick.TickGroup = TG_PrePhysics;
 
+  // Snapshot the counter once so the render target and capture component
+  // share the same suffix on this instance.
+  const int Index = SCENE_CAPTURE_COUNTER.fetch_add(1, std::memory_order_relaxed);
+
   CaptureRenderTarget = CreateDefaultSubobject<UTextureRenderTarget2D>(
-      FName(*FString::Printf(TEXT("CaptureRenderTarget_d%d"), SCENE_CAPTURE_COUNTER)));
+      FName(*FString::Printf(TEXT("CaptureRenderTarget_d%d"), Index)));
   CaptureRenderTarget->CompressionSettings = TextureCompressionSettings::TC_Default;
   CaptureRenderTarget->SRGB = false;
   CaptureRenderTarget->bAutoGenerateMips = false;
@@ -80,7 +88,7 @@ ASceneCaptureSensor::ASceneCaptureSensor(const FObjectInitializer &ObjectInitial
   CaptureRenderTarget->AddressY = TextureAddress::TA_Clamp;
 
   CaptureComponent2D = CreateDefaultSubobject<USceneCaptureComponent2D_CARLA>(
-      FName(*FString::Printf(TEXT("USceneCaptureComponent2D%d"), SCENE_CAPTURE_COUNTER)));
+      FName(*FString::Printf(TEXT("USceneCaptureComponent2D%d"), Index)));
   check(CaptureComponent2D != nullptr);
   CaptureComponent2D->ViewActor = this;
   CaptureComponent2D->SetupAttachment(RootComponent);
@@ -94,8 +102,6 @@ ASceneCaptureSensor::ASceneCaptureSensor(const FObjectInitializer &ObjectInitial
   ApplyRayTracingSetting();
 
   SceneCaptureSensor_local_ns::SetCameraDefaultOverrides(*CaptureComponent2D);
-
-  ++SCENE_CAPTURE_COUNTER;
 }
 
 void ASceneCaptureSensor::Set(const FActorDescription &Description)
@@ -1039,7 +1045,9 @@ void ASceneCaptureSensor::EndPlay(const EEndPlayReason::Type EndPlayReason)
   {
     CaptureRenderTarget->ReleaseResource();
   }
-  SCENE_CAPTURE_COUNTER = 0u;
+  // SCENE_CAPTURE_COUNTER intentionally not reset: monotonic across the
+  // process lifetime so subobject names assigned to the next sensor do not
+  // collide with any sibling sensor still alive on that suffix.
 }
 
 #ifdef CARLA_HAS_GBUFFER_API
