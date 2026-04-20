@@ -226,6 +226,7 @@ void UCarlaSettingsDelegate::LaunchLowQualityCommands(UWorld *world) const
 
   // --- Streaming + misc legacy CVars kept for parity -------------------
   GEngine->Exec(world, TEXT("r.Streaming.PoolSize 2000"));
+  GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
   GEngine->Exec(world, TEXT("r.DefaultFeature.MotionBlur 0"));
   GEngine->Exec(world, TEXT("r.DefaultFeature.Bloom 0"));
   GEngine->Exec(world, TEXT("r.DefaultFeature.AmbientOcclusion 0"));
@@ -287,6 +288,7 @@ void UCarlaSettingsDelegate::LaunchMediumQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("sg.ShadingQuality 2"));
 
   GEngine->Exec(world, TEXT("r.Streaming.PoolSize 3000"));
+  GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
   GEngine->Exec(world, TEXT("foliage.DensityScale 1"));
   GEngine->Exec(world, TEXT("grass.DensityScale 1"));
 }
@@ -348,6 +350,7 @@ void UCarlaSettingsDelegate::LaunchHighQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("sg.ShadingQuality 3"));
 
   GEngine->Exec(world, TEXT("r.Streaming.PoolSize 4000"));
+  GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
   GEngine->Exec(world, TEXT("foliage.DensityScale 1"));
   GEngine->Exec(world, TEXT("grass.DensityScale 1"));
 }
@@ -567,6 +570,7 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("sg.ShadingQuality 3"));
 
   GEngine->Exec(world, TEXT("r.Streaming.PoolSize 4000"));
+  GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
   GEngine->Exec(world, TEXT("r.ViewDistanceScale 1"));
   GEngine->Exec(world, TEXT("foliage.DensityScale 1"));
   GEngine->Exec(world, TEXT("grass.DensityScale 1"));
