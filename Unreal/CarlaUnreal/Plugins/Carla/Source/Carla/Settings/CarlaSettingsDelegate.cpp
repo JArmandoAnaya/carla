@@ -571,6 +571,13 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
 
   GEngine->Exec(world, TEXT("r.Streaming.PoolSize 4000"));
   GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
+  // Cap the streaming temp scratch buffer at 32 MB (default 50). With the
+  // pool clamp above absorbing most growth, the scratch only needs to hold
+  // a couple of large mip uploads in flight; the smaller cap shaves ~10-20
+  // MB off the working set on Epic. Risk: streaming hitches if many large
+  // textures need to stage at once - the streamer falls back to round-robin
+  // staging instead of bulk-uploading.
+  GEngine->Exec(world, TEXT("r.Streaming.MaxTempMemoryAllowed 32"));
   GEngine->Exec(world, TEXT("r.ViewDistanceScale 1"));
   GEngine->Exec(world, TEXT("foliage.DensityScale 1"));
   GEngine->Exec(world, TEXT("grass.DensityScale 1"));
