@@ -565,9 +565,23 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   }
 
   // Epic = High (SW-Lumen maxed) + full Hardware Ray Tracing restored + a
-  // handful of UE5.5-specific quality bumps. The RT subsystem itself is
-  // started via DefaultEngine.ini (r.RayTracing is ECVF_ReadOnly so runtime
-  // toggling is impossible); this function enables the per-effect CVars.
+  // handful of UE5.5-specific quality bumps, tuned to match upstream
+  // ue5-dev's rendering fidelity via delegate-only CVars (no ini changes).
+  // Deltas vs upstream Epic:
+  //   - HW-RT is flipped here at quality-apply instead of engine init; the
+  //     first few level-load frames render with SW-Lumen before quality is
+  //     applied. Not delegate-reachable.
+  //   - r.CustomDepth is bumped to 3 here (upstream ini had it); lower tiers
+  //     keep the ini baseline of 1 as the VRAM-saving default.
+  //   - r.SkinCache.SceneMemoryLimitInMB is bumped to 1024 here (upstream
+  //     ini default); lower tiers inherit the 256 MB ini baseline.
+  // Where we already exceed upstream (VSM 8192, Nanite 512, TSR 200,
+  // reflection capture 512, MegaLights, Shadow.DistanceScale 2,
+  // UseFarShadowCulling 0, Lumen MaxBounces 2, HitLighting.ShadowMode 1,
+  // HitLighting.ReflectionCaptures) we keep the stronger value. The RT
+  // subsystem itself is started via DefaultEngine.ini (r.RayTracing is
+  // ECVF_ReadOnly so runtime toggling is impossible); this function enables
+  // the per-effect CVars.
   GEngine->Exec(world, TEXT("r.DynamicGlobalIlluminationMethod 1"));
   GEngine->Exec(world, TEXT("r.ReflectionMethod 1"));
   GEngine->Exec(world, TEXT("r.Lumen.DiffuseIndirect.Allow 1"));
@@ -600,9 +614,14 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   // UE5.5 only: don't cull the far VSM clipmaps, so long-range shadows from
   // distant trees and traffic infrastructure do not pop as the ego moves.
   GEngine->Exec(world, TEXT("r.Shadow.Virtual.UseFarShadowCulling 0"));
-  // Full skin cache residency so the HW-RT BVH keeps every vehicle skinned
-  // instead of dropping large meshes to flat.
-  GEngine->Exec(world, TEXT("r.SkinCache.SceneMemoryLimitInMB 768"));
+  // Full skin cache residency matching upstream ue5-dev's engine-init value
+  // so the HW-RT BVH holds every vehicle + ped skeletal mesh without
+  // eviction under heavy actor counts (>30 vehicles in Town10). 768 MB
+  // began evicting at that traffic density and Lumen reflections on
+  // metallic car paint saw flat-shaded ghosts of other NPCs. Lower tiers
+  // keep the 256 MB DefaultEngine.ini baseline or their own tier-specific
+  // caps.
+  GEngine->Exec(world, TEXT("r.SkinCache.SceneMemoryLimitInMB 1024"));
   GEngine->Exec(world, TEXT("r.TSR.History.ScreenPercentage 200"));
   GEngine->Exec(world, TEXT("r.LumenScene.SurfaceCache.AtlasSize 4096"));
   GEngine->Exec(world, TEXT("r.MaxAnisotropy 8"));
@@ -619,6 +638,14 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   // expected envelope delta ~+60-120 MB on Town10. Lower tiers keep 256 via
   // DefaultEngine.ini.
   GEngine->Exec(world, TEXT("r.ReflectionCaptureResolution 512"));
+  // Match upstream's r.CustomDepth=3 at Epic: depth + stencil target,
+  // not just depth. CARLA's semantic tagging uses
+  // SetCustomPrimitiveDataVector4 so the stencil is not load-bearing for
+  // the pipeline, but user-authored post-process content (outlines,
+  // silhouette masks) depends on stencil. Lower tiers continue to inherit
+  // the ini baseline r.CustomDepth=1, which saves ~40-80 MB of stencil
+  // target VRAM at 1080p.
+  GEngine->Exec(world, TEXT("r.CustomDepth 3"));
 
   // --- Scalability group buckets ---------------------------------------
   GEngine->Exec(world, TEXT("sg.ResolutionQuality 100"));
@@ -632,6 +659,10 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("sg.EffectsQuality 3"));
   GEngine->Exec(world, TEXT("sg.FoliageQuality 3"));
   GEngine->Exec(world, TEXT("sg.ShadingQuality 3"));
+
+  // Dithered LOD transitions on foliage/grass (upstream Epic default).
+  // Smooths the crossfade between LODs on palm trees and hedgerows.
+  GEngine->Exec(world, TEXT("Foliage.DitheredLOD 1"));
 
   GEngine->Exec(world, TEXT("r.Streaming.PoolSize 4000"));
   GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
