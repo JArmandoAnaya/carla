@@ -192,10 +192,18 @@ void UCarlaSettingsDelegate::LaunchLowQualityCommands(UWorld *world) const
   }
 
   // --- UE5 rendering features: disable the expensive ones ---------------
-  // Disable Lumen GI, Lumen/RT reflections and HW ray tracing entirely.
-  GEngine->Exec(world, TEXT("r.DynamicGlobalIlluminationMethod 0"));
+  // Low uses Lumen software GI. The v3.1 SSGI path was dropped because
+  // UE5's screen-space path leaves large occluded regions (building sides,
+  // under-eaves, vehicle interiors) near-black with no off-screen bounce
+  // source. v3.2 tried Lumen at sg.GlobalIlluminationQuality 1 -- probes
+  // were too sparse, shadow/highlight contrast stayed wrong. This revision
+  // runs Lumen at Medium's density (set via the sg.* block below) with a
+  // 25% indirect scale (see below) for balanced scene lighting. HW-RT
+  // stays off, Lumen reflections stay off (SSR only), and the surface-
+  // cache atlas is trimmed to 2048 to keep Low under Medium's envelope.
+  GEngine->Exec(world, TEXT("r.DynamicGlobalIlluminationMethod 1"));
   GEngine->Exec(world, TEXT("r.ReflectionMethod 2"));
-  GEngine->Exec(world, TEXT("r.Lumen.DiffuseIndirect.Allow 0"));
+  GEngine->Exec(world, TEXT("r.Lumen.DiffuseIndirect.Allow 1"));
   GEngine->Exec(world, TEXT("r.Lumen.Reflections.Allow 0"));
   GEngine->Exec(world, TEXT("r.Lumen.HardwareRayTracing 0"));
   // r.RayTracing is ECVF_ReadOnly and is pinned True by DefaultEngine.ini so
@@ -204,28 +212,42 @@ void UCarlaSettingsDelegate::LaunchLowQualityCommands(UWorld *world) const
   // effect so this tier behaves as if RT were off.
   GEngine->Exec(world, TEXT("r.RayTracing.ForceAllRayTracingEffects 0"));
   GEngine->Exec(world, TEXT("r.RayTracing.Shadows 0"));
-  // Virtual Shadow Maps off (heavy VRAM cost on their cache).
-  GEngine->Exec(world, TEXT("r.Shadow.Virtual.Enable 0"));
+  // VSM enabled with a small page pool. 2048 pages is half of Medium's
+  // 4096 (~128 MB), enough for ego + short cascades but keeps the VRAM
+  // budget well under 6 GB. Without VSM on, shadows degrade to the legacy
+  // cascaded SM path which looks worse than Medium's VSM shadows.
+  GEngine->Exec(world, TEXT("r.Shadow.Virtual.Enable 1"));
+  GEngine->Exec(world, TEXT("r.Shadow.Virtual.MaxPhysicalPages 2048"));
   // Nanite stays on but with the smallest streaming pool we dare.
   GEngine->Exec(world, TEXT("r.Nanite.Streaming.PoolSize 128"));
   // Use TAA (cheaper than TSR at low tier).
   GEngine->Exec(world, TEXT("r.AntiAliasingMethod 2"));
 
   // --- Scalability group buckets ---------------------------------------
+  // Low maps to sg.*Quality 1 across the board *except* GI and reflections:
+  //   sg.GlobalIlluminationQuality 2 pulls Medium's Lumen SW preset
+  //   (Radiosity ProbeSpacing 4, ScreenProbeGather DownsampleFactor 16),
+  //   so shadow regions get dense indirect fill. Low still stays clearly
+  //   below Medium via render res, AA, VSM / Nanite pools, foliage density,
+  //   skin cache, and (the intended differentiator) reflections.
+  //   sg.ReflectionQuality 0 keeps Lumen reflections off; SSR below is the
+  //   only reflection signal.
   GEngine->Exec(world, TEXT("sg.ResolutionQuality 50"));
-  GEngine->Exec(world, TEXT("sg.ViewDistanceQuality 0"));
-  GEngine->Exec(world, TEXT("sg.AntiAliasingQuality 0"));
-  GEngine->Exec(world, TEXT("sg.ShadowQuality 0"));
-  GEngine->Exec(world, TEXT("sg.GlobalIlluminationQuality 0"));
+  GEngine->Exec(world, TEXT("sg.ViewDistanceQuality 1"));
+  GEngine->Exec(world, TEXT("sg.AntiAliasingQuality 1"));
+  GEngine->Exec(world, TEXT("sg.ShadowQuality 1"));
+  GEngine->Exec(world, TEXT("sg.GlobalIlluminationQuality 2"));
   GEngine->Exec(world, TEXT("sg.ReflectionQuality 0"));
-  GEngine->Exec(world, TEXT("sg.PostProcessQuality 0"));
-  GEngine->Exec(world, TEXT("sg.TextureQuality 0"));
-  GEngine->Exec(world, TEXT("sg.EffectsQuality 0"));
-  GEngine->Exec(world, TEXT("sg.FoliageQuality 0"));
-  GEngine->Exec(world, TEXT("sg.ShadingQuality 0"));
+  GEngine->Exec(world, TEXT("sg.PostProcessQuality 1"));
+  GEngine->Exec(world, TEXT("sg.TextureQuality 1"));
+  GEngine->Exec(world, TEXT("sg.EffectsQuality 1"));
+  GEngine->Exec(world, TEXT("sg.FoliageQuality 1"));
+  GEngine->Exec(world, TEXT("sg.ShadingQuality 1"));
 
   // --- Streaming + misc legacy CVars kept for parity -------------------
-  GEngine->Exec(world, TEXT("r.Streaming.PoolSize 2000"));
+  // Streaming pool 3000 matches [TextureQuality@1] in DefaultScalability,
+  // so more car / building textures stay resident at full mip.
+  GEngine->Exec(world, TEXT("r.Streaming.PoolSize 3000"));
   GEngine->Exec(world, TEXT("r.Streaming.LimitPoolSizeToVRAM 1"));
   GEngine->Exec(world, TEXT("r.DefaultFeature.MotionBlur 0"));
   GEngine->Exec(world, TEXT("r.DefaultFeature.Bloom 0"));
@@ -234,6 +256,35 @@ void UCarlaSettingsDelegate::LaunchLowQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("r.DefaultFeature.AutoExposure 1"));
   GEngine->Exec(world, TEXT("foliage.DensityScale 0"));
   GEngine->Exec(world, TEXT("grass.DensityScale 0"));
+
+  // Reset Epic-only state so Epic -> Low downgrades actually realize the
+  // tier's VRAM envelope. SkinCache 256 MB (down from Epic's 768) keeps
+  // CARLA vehicle skeletons resident without matching Medium's 512 MB;
+  // ReflectionCaptureResolution matches DefaultEngine.ini so the next
+  // level load recaptures at 256; MegaLights is inert without HW-RT but
+  // kept consistent.
+  GEngine->Exec(world, TEXT("r.SkinCache.SceneMemoryLimitInMB 256"));
+  GEngine->Exec(world, TEXT("r.ReflectionCaptureResolution 256"));
+  GEngine->Exec(world, TEXT("r.MegaLights.EnableForProject 0"));
+
+  // Trim the Lumen surface-cache atlas: 2048 (~32 MB) vs the 4096 default
+  // (~128 MB). Cheap GI still has some surface-cache cost; the smaller
+  // atlas keeps the Low envelope below Medium's.
+  GEngine->Exec(world, TEXT("r.LumenScene.SurfaceCache.AtlasSize 2048"));
+
+  // Boost the Lumen diffuse indirect contribution by 25%. Low sits below
+  // Medium on render res, AA, shadow pool, and foliage; those extra
+  // differentiators mean the scene average is darker than Medium's at the
+  // same sun angle, and CARLA's auto-exposure then over-brightens direct
+  // surfaces to compensate. A mild indirect boost lifts shadow values
+  // without touching the tonemapper and lets auto-exposure settle.
+  GEngine->Exec(world, TEXT("r.Lumen.DiffuseIndirect.Scale 1.25"));
+
+  // Car paint on Low was too matte with no reflection signal at all (Lumen
+  // off, SSR off via [EffectsQuality@0] / [ReflectionQuality@0]). Turn on
+  // cheap screen-space reflections so paint picks up sky + nearby
+  // buildings. No Lumen, no HW-RT; reuses existing scene color.
+  GEngine->Exec(world, TEXT("r.SSR.Quality 2"));
 }
 
 void UCarlaSettingsDelegate::LaunchMediumQualityCommands(UWorld *world) const
@@ -270,6 +321,11 @@ void UCarlaSettingsDelegate::LaunchMediumQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("r.MaxAnisotropy 4"));
   GEngine->Exec(world, TEXT("r.Nanite.Streaming.PoolSize 256"));
   GEngine->Exec(world, TEXT("r.AntiAliasingMethod 4")); // TSR
+  // Reset Epic-only state so Epic -> Medium downgrades don't retain the
+  // 512-px reflection captures or MegaLights (MegaLights is inert without
+  // HW-RT but kept consistent).
+  GEngine->Exec(world, TEXT("r.ReflectionCaptureResolution 256"));
+  GEngine->Exec(world, TEXT("r.MegaLights.EnableForProject 0"));
 
   // --- Scalability group buckets ---------------------------------------
   // Medium now maps to the sg.*Quality 2 buckets so it inherits the SW-Lumen
@@ -300,11 +356,14 @@ void UCarlaSettingsDelegate::LaunchHighQualityCommands(UWorld *world) const
     return;
   }
 
-  // High now inherits what used to be Epic's SW-Lumen configuration: maxed
-  // Lumen SW reflections + GI, VSM page pool doubled, long directional-light
-  // shadow distance, full skin cache residency, wide TSR history. HW-RT
-  // stays off so the VRAM envelope matches the previous post-refactor
-  // baseline (~9.5 GB windowed with 30 cars).
+  // High inherits the SW-Lumen configuration that used to belong to Epic,
+  // but four of the heaviest runtime pools (VSM pages, skin cache, TSR
+  // history, Nanite streaming) are trimmed to Medium levels. At the former
+  // "full" values (8192 VSM pages / 768 MB skin / TSR 200 / 384 MB Nanite)
+  // the level-load allocation storm on 12 GB GPUs hangs the Vulkan driver
+  // with no recovery. The trimmed values preserve the sg.*Quality 3 visual
+  // uplift (shadows, textures, effects, post) while saving ~500-700 MB of
+  // peak VRAM headroom.
   GEngine->Exec(world, TEXT("r.DynamicGlobalIlluminationMethod 1"));
   GEngine->Exec(world, TEXT("r.ReflectionMethod 1"));
   GEngine->Exec(world, TEXT("r.Lumen.DiffuseIndirect.Allow 1"));
@@ -314,23 +373,22 @@ void UCarlaSettingsDelegate::LaunchHighQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("r.RayTracing.ForceAllRayTracingEffects 0"));
   GEngine->Exec(world, TEXT("r.RayTracing.Shadows 0"));
   GEngine->Exec(world, TEXT("r.Shadow.Virtual.Enable 1"));
-  // 8192 VSM pages (~512 MB pool) so distant cascades hold up under the
-  // 1080p multi-camera workloads the team runs (was the main reason tree
-  // and traffic-light shadows only loaded within a few metres of the ego).
-  GEngine->Exec(world, TEXT("r.Shadow.Virtual.MaxPhysicalPages 8192"));
+  // 4096 VSM pages matches Medium; 8192 contributed to the boot hang.
+  GEngine->Exec(world, TEXT("r.Shadow.Virtual.MaxPhysicalPages 4096"));
   // 2x directional-light shadow distance keeps far shadows present.
   GEngine->Exec(world, TEXT("r.Shadow.DistanceScale 2"));
-  // Full skin cache: large vehicles need ~768 MB to stay resident so Lumen
-  // card tracing + (on Epic) HW-RT BVH skinning don't drop them to matte.
-  GEngine->Exec(world, TEXT("r.SkinCache.SceneMemoryLimitInMB 768"));
-  // Widen the TSR history to reduce high-contrast shimmer on far road
-  // paint (crosswalk stripes, lane markings).
-  GEngine->Exec(world, TEXT("r.TSR.History.ScreenPercentage 200"));
+  // Skin cache trimmed 768 -> 512 MB. Matches Medium; still holds the
+  // common ego + NPC skeletons resident for SW-Lumen card tracing.
+  GEngine->Exec(world, TEXT("r.SkinCache.SceneMemoryLimitInMB 512"));
+  // TSR history trimmed 200 -> 150% (Medium level). Still reduces far
+  // road-paint shimmer without the 200% history buffer's full memory cost.
+  GEngine->Exec(world, TEXT("r.TSR.History.ScreenPercentage 150"));
   // Pin Lumen surface card atlas at the UE5.5 default. Explicit to protect
   // against future default drops on lower-spec presets.
   GEngine->Exec(world, TEXT("r.LumenScene.SurfaceCache.AtlasSize 4096"));
   GEngine->Exec(world, TEXT("r.MaxAnisotropy 8"));
-  GEngine->Exec(world, TEXT("r.Nanite.Streaming.PoolSize 384"));
+  // Nanite streaming pool trimmed 384 -> 256 MB (Medium level).
+  GEngine->Exec(world, TEXT("r.Nanite.Streaming.PoolSize 256"));
   GEngine->Exec(world, TEXT("r.AntiAliasingMethod 4")); // TSR
 
   // --- Scalability group buckets ---------------------------------------
