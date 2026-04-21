@@ -390,7 +390,7 @@ private:
   UPROPERTY(EditAnywhere)
   TArray<FForceAtLocation> ForcesToApply;
   UPROPERTY(EditAnywhere)
-  UPrimitiveComponent* RootComponent;
+  TObjectPtr<UPrimitiveComponent> RootComponent;
   UPROPERTY(EditAnywhere)
   float RayCastRange = 10.0f;
 
@@ -442,14 +442,14 @@ private:
   UPROPERTY(EditAnywhere, Category="DeformationMesh")
   bool bUseDeformationPlane = false;
   UPROPERTY(EditAnywhere, Category="DeformationMesh")
-  UStaticMesh* DeformationPlaneMesh = nullptr;
+  TObjectPtr<UStaticMesh> DeformationPlaneMesh = nullptr;
   UPROPERTY(EditAnywhere, Category="DeformationMesh")
-  UMaterialInstance* DeformationPlaneMaterial = nullptr;
+  TObjectPtr<UMaterialInstance> DeformationPlaneMaterial = nullptr;
   UPROPERTY(VisibleAnywhere, Category="DeformationMesh")
-  AStaticMeshActor* DeformationPlaneActor = nullptr;
+  TObjectPtr<AStaticMeshActor> DeformationPlaneActor = nullptr;
 
   UPROPERTY()
-  UMaterialParameterCollectionInstance* MPCInstance;
+  TObjectPtr<UMaterialParameterCollectionInstance> MPCInstance;
 
   UPROPERTY(EditAnywhere, Category="Forces")
   float NormalForceIntensity = 100;
@@ -461,7 +461,7 @@ private:
   UPROPERTY(EditAnywhere)
   float TerrainDepth = 40;
   UPROPERTY(EditAnywhere)
-  AActor *FloorActor = nullptr;
+  TObjectPtr<AActor> FloorActor = nullptr;
   UPROPERTY(EditAnywhere)
   bool bUseDynamicModel = false;
   UPROPERTY(EditAnywhere)
@@ -520,9 +520,10 @@ private:
   UPROPERTY(VisibleAnywhere)
   FIntVector CurrentLargeMapTileId = FIntVector(-1,-1,0);
   UPROPERTY(VisibleAnywhere)
-  ALargeMapManager* LargeMapManager = nullptr;
+  TObjectPtr<ALargeMapManager> LargeMapManager = nullptr;
 
-  TArray<ACarlaWheeledVehicle*> Vehicles;
+  UPROPERTY()
+  TArray<TObjectPtr<ACarlaWheeledVehicle>> Vehicles;
   FSparseHighDetailMap SparseMap;
   TArray<uint8> Data;
   TArray<uint8> LargeData;

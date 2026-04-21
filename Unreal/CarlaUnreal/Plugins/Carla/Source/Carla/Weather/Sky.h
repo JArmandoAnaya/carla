@@ -26,25 +26,25 @@ public:
 protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	UPostProcessComponent* PostProcessComponent;
+	TObjectPtr<UPostProcessComponent> PostProcessComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	UExponentialHeightFogComponent* ExponentialHeightFogComponent;
+	TObjectPtr<UExponentialHeightFogComponent> ExponentialHeightFogComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	UDirectionalLightComponent* DirectionalLightComponentSun;
+	TObjectPtr<UDirectionalLightComponent> DirectionalLightComponentSun;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	UDirectionalLightComponent* DirectionalLightComponentMoon;
+	TObjectPtr<UDirectionalLightComponent> DirectionalLightComponentMoon;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	USkyLightComponent* SkyLightComponent;
+	TObjectPtr<USkyLightComponent> SkyLightComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	UVolumetricCloudComponent* VolumetricCloudComponent;
+	TObjectPtr<UVolumetricCloudComponent> VolumetricCloudComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Components")
-	USkyAtmosphereComponent* SkyAtmosphereComponent;
+	TObjectPtr<USkyAtmosphereComponent> SkyAtmosphereComponent;
 
 
 };
