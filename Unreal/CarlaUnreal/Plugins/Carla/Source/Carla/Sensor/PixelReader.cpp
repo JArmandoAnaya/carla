@@ -22,6 +22,17 @@
 // -- FPixelReader -------------------------------------------------------------
 // =============================================================================
 
+static TAutoConsoleVariable<int32> CVarPixelReaderLegacyVulkanFenceFlush(
+    TEXT("carla.PixelReader.LegacyVulkanFenceFlush"),
+    0,
+    TEXT("UE4-era Vulkan fence-flush workaround inside FPixelReader::WritePixelsToBuffer.\n")
+    TEXT("Creates an RQT_AbsoluteTime render query, flushes the RHI thread, and\n")
+    TEXT("synchronously waits for the result after every EnqueueCopy. UE 5.5 Vulkan\n")
+    TEXT("rewrote fence handling; the workaround is believed unnecessary.\n")
+    TEXT("  0: Skip the workaround (default).\n")
+    TEXT("  1: Run the legacy fence-flush block (rollback)."),
+    ECVF_Default);
+
 void FPixelReader::WritePixelsToBuffer(
     UTextureRenderTarget2D &RenderTarget,
     uint32 Offset,
@@ -64,8 +75,9 @@ void FPixelReader::WritePixelsToBuffer(
                           FResolveRect(0, 0, BackBufferSize.X, BackBufferSize.Y));
   }
 
-  // workaround to force RHI with Vulkan to refresh the fences state in the middle of frame
+  if (CVarPixelReaderLegacyVulkanFenceFlush.GetValueOnRenderThread() != 0)
   {
+    // workaround to force RHI with Vulkan to refresh the fences state in the middle of frame
     FRenderQueryRHIRef Query = RHICreateRenderQuery(RQT_AbsoluteTime);
     TRACE_CPUPROFILER_EVENT_SCOPE_STR("create query");
     RHICmdList.EndRenderQuery(Query);
