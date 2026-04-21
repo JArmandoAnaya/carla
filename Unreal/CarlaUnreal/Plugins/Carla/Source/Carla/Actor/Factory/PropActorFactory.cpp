@@ -26,9 +26,15 @@ TArray<FActorDefinition> APropActorFactory::GetDefinitions()
   MeshCacheByPath.Reset();
   for (const FPropParameters& Params : PropsParams)
   {
-    if (Params.Mesh != nullptr)
+    if (Params.Mesh.IsNull())
     {
-      MeshCacheByPath.Add(Params.Mesh->GetPathName(), Params.Mesh);
+      continue;
+    }
+    const FString MeshPath = Params.Mesh.ToSoftObjectPath().ToString();
+    UStaticMesh* Mesh = Params.Mesh.LoadSynchronous();
+    if (Mesh != nullptr)
+    {
+      MeshCacheByPath.Add(MeshPath, Mesh);
     }
   }
 
@@ -143,7 +149,7 @@ TSharedPtr<FJsonObject> APropActorFactory::FPropParametersToJsonObject(const FPr
   TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
 
   JsonObject->SetStringField(TEXT("Name"), PropParams.Name);
-  JsonObject->SetStringField(TEXT("Mesh"), PropParams.Mesh->GetPathName());
+  JsonObject->SetStringField(TEXT("Mesh"), PropParams.Mesh.ToSoftObjectPath().ToString());
 
   FString PropSizeString;
   switch(PropParams.Size)
@@ -217,10 +223,12 @@ bool APropActorFactory::JsonToFPropParameters(const TSharedPtr<FJsonObject> Json
 
     JsonObject->TryGetStringField(TEXT("Name"), OutPropParams.Name);
 
-    // Convert "Mesh" string back to a FMesh reference
+    // Build the soft reference from the path string; the actual UStaticMesh
+    // load is deferred to MakePropDefinition / the factory cache seed so the
+    // JSON parse itself does not block on disk I/O.
     FString MeshPath;
     JsonObject->TryGetStringField(TEXT("Mesh"), MeshPath);
-    OutPropParams.Mesh = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *(MeshPath)));
+    OutPropParams.Mesh = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(MeshPath));
 
     FString PropSizeString;
     JsonObject->TryGetStringField(TEXT("Size"), PropSizeString);
