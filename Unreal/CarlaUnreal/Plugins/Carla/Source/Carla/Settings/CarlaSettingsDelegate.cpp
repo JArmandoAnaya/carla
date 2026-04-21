@@ -555,6 +555,12 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   GEngine->Exec(world, TEXT("r.MegaLights.EnableForProject 1"));
   GEngine->Exec(world, TEXT("r.Nanite.Streaming.PoolSize 512"));
   GEngine->Exec(world, TEXT("r.AntiAliasingMethod 4")); // TSR
+  // Epic-only cubemap sharpness bump for polished-but-rough surfaces (car
+  // flanks at grazing angles, matte metallic panels) where Lumen reflections
+  // hand off to the reflection capture. 256 -> 512 quadruples per-probe VRAM;
+  // expected envelope delta ~+60-120 MB on Town10. Lower tiers keep 256 via
+  // DefaultEngine.ini.
+  GEngine->Exec(world, TEXT("r.ReflectionCaptureResolution 512"));
 
   // --- Scalability group buckets ---------------------------------------
   GEngine->Exec(world, TEXT("sg.ResolutionQuality 100"));
