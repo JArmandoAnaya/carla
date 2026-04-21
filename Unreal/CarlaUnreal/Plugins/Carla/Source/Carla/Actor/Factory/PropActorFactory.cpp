@@ -23,6 +23,15 @@ TArray<FActorDefinition> APropActorFactory::GetDefinitions()
 {
   LoadPropParametersArrayFromFile("PropParameters.json", PropsParams);
 
+  MeshCacheByPath.Reset();
+  for (const FPropParameters& Params : PropsParams)
+  {
+    if (Params.Mesh != nullptr)
+    {
+      MeshCacheByPath.Add(Params.Mesh->GetPathName(), Params.Mesh);
+    }
+  }
+
   UActorBlueprintFunctionLibrary::MakePropDefinitions(PropsParams, Definitions);
   return Definitions;
 }
@@ -87,7 +96,23 @@ FActorSpawnResult APropActorFactory::SpawnActor(
     return SpawnResult;
   }
 
-  UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+  UStaticMesh* Mesh = nullptr;
+  if (TObjectPtr<UStaticMesh>* Cached = MeshCacheByPath.Find(MeshPath))
+  {
+    Mesh = Cached->Get();
+  }
+  else
+  {
+    UE_LOG(LogCarla, Warning,
+        TEXT("PropActorFactory: mesh cache miss for '%s' (actor %s); falling back to synchronous LoadObject."),
+        *MeshPath, *ActorDescription.Id);
+    Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+    if (Mesh != nullptr)
+    {
+      MeshCacheByPath.Add(MeshPath, Mesh);
+    }
+  }
+
   if (Mesh == nullptr)
   {
     UE_LOG(LogCarla, Error, TEXT("Prop spawn failed: Failed to load mesh '%s' for actor %s"),
