@@ -21,6 +21,7 @@ THIRD_PARTY_INCLUDES_END
 #include "Engine/StaticMeshActor.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/DataAsset.h"
+#include "Engine/StreamableManager.h"
 #include "Async/Future.h"
 #include "Misc/ScopeLock.h"
 #include <util/ue-header-guard-end.h>
@@ -521,6 +522,16 @@ private:
   FIntVector CurrentLargeMapTileId = FIntVector(-1,-1,0);
   UPROPERTY(VisibleAnywhere)
   TObjectPtr<ALargeMapManager> LargeMapManager = nullptr;
+
+  // Async heightmap streaming state (Bundle D).
+  // ActiveHeightMap keeps the most recently applied data asset rooted for GC
+  // while the streaming handle is the primary owner during the in-flight load.
+  UPROPERTY()
+  TObjectPtr<UHeightMapDataAsset> ActiveHeightMap = nullptr;
+  TSharedPtr<FStreamableHandle> PendingHeightMapHandle;
+  FIntVector PendingHeightMapTileId = FIntVector(-1, -1, 0);
+
+  void OnHeightMapLoaded();
 
   UPROPERTY()
   TArray<TObjectPtr<ACarlaWheeledVehicle>> Vehicles;
