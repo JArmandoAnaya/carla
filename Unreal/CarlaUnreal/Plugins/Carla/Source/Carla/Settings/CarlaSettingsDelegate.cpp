@@ -603,6 +603,14 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   // car paint reflecting other cars pick up their reflections too. Default
   // is 1 (single bounce); only takes effect under HW-RT Hit Lighting.
   GEngine->Exec(world, TEXT("r.Lumen.Reflections.MaxBounces 2"));
+  // Hand the medium-roughness band off from Lumen to SSR / reflection
+  // captures. UE5.5 default is 0.4; dropping to 0.2 keeps Lumen tracing
+  // for mirror-to-glossy surfaces (polished car paint, glass, water) but
+  // hands wet asphalt (~0.2-0.3 roughness) to SSR. This removes the
+  // Lumen SurfaceCache smearing of traffic-light radiance across adjacent
+  // buildings / floor while preserving the rich reflections on the
+  // surfaces that actually benefit from HW-RT Hit Lighting.
+  GEngine->Exec(world, TEXT("r.Lumen.Reflections.MaxRoughnessToTrace 0.2"));
   // Sharper shadow resolution for hit-lighting samples inside reflections
   // (default 0 = Lumen surface-cache shadows; 1 = virtual shadow maps).
   GEngine->Exec(world, TEXT("r.Lumen.HardwareRayTracing.HitLighting.ShadowMode 1"));
@@ -631,6 +639,12 @@ void UCarlaSettingsDelegate::LaunchEpicQualityCommands(UWorld *world) const
   // on car paint, shadowing from local lights).
   GEngine->Exec(world, TEXT("r.MegaLights.EnableForProject 1"));
   GEngine->Exec(world, TEXT("r.Nanite.Streaming.PoolSize 512"));
+  // Split texture-upload bursts across frames so a camera switch does
+  // not spike one frame. Pure frame-pacing; no residency / VRAM cost.
+  // Companion to the one-shot AddViewLocation hint in
+  // ASceneCaptureSensor::BeginPlay, which gives newly attached cameras
+  // a 2 s priority boost at their location.
+  GEngine->Exec(world, TEXT("r.Streaming.AmortizeCPUToGPUCopy 1"));
   GEngine->Exec(world, TEXT("r.AntiAliasingMethod 4")); // TSR
   // Epic-only cubemap sharpness bump for polished-but-rough surfaces (car
   // flanks at grazing angles, matte metallic panels) where Lumen reflections

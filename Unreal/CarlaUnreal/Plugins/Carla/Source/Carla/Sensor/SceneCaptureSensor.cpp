@@ -11,6 +11,7 @@
 
 #include <util/ue-header-guard-begin.h>
 #include "Actor/ActorBlueprintFunctionLibrary.h"
+#include "ContentStreaming.h"
 #include "Engine/PostProcessVolume.h"
 #include "GameFramework/SpectatorPawn.h"
 #include <util/ue-header-guard-end.h>
@@ -947,6 +948,18 @@ void ASceneCaptureSensor::BeginPlay()
 
   CaptureComponent2D->UpdateContent();
   CaptureComponent2D->Activate();
+
+  // Nudge texture streaming priority at the new sensor's location so
+  // a freshly attached camera does not stall the first few captures
+  // waiting for its local region to reach full mip. One-shot 2-second
+  // duration fades out naturally; permanent hints would widen the
+  // priority surface on multi-camera dataset runs (N sensors = N
+  // permanent streaming sources).
+  IStreamingManager::Get().AddViewLocation(
+      GetActorLocation(),
+      /*BoostFactor=*/ 1.5f,
+      /*bOverrideLocation=*/ true,
+      /*Duration=*/ 2.0f);
 
   auto PostProcessConfig = FPostProcessConfig(
       CaptureComponent2D->PostProcessSettings,
