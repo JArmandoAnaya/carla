@@ -177,11 +177,8 @@ python3 ./map_tools/generate_map_artifacts.py \
 Connects to a running CARLA server (it never launches one), exports the road
 network from OpenDRIVE, builds the lanelet2 map and point-cloud map, and
 injects traffic-light regulatory elements from the simulator's actual
-traffic-light actors. Caveat: the injected elements are not yet consumable by
-Autoware's traffic-light pipeline (stop-line anchoring and camera ROI
-projection are unverified), which is why the run script disables the
-traffic-light module by default — treat generated maps as
-traffic-light-free for now. `--tick`
+traffic-light actors; Autoware's camera-based traffic-light recognition
+projects its ROIs from these elements. `--tick`
 makes the tool the **single** ticking client of a synchronous world; omit it
 only if another client is already ticking. The lanelet2 converter needs the
 pinned deps from `map_tools/requirements.txt` in a venv — see
@@ -269,10 +266,10 @@ Under the hood the script sequences, in order:
      ADAPI topics publish at a low rate; at sub-realtime sim speed the stock
      3 s staleness window flaps ERROR and the MRM pulses EMERGENCY_STOP —
      the car freezes mid-drive with nothing actually wrong.
-   - `planning/preset/default_preset.yaml`:
-     `launch_traffic_light_module → false`. The generated lanelet2 maps do
-     not yet carry usable traffic-light regulatory elements; with the module
-     on, the car can wait forever at a light it cannot see.
+   - `autoware_launch` `e2e_simulator.launch.xml`:
+     `traffic_light_recognition/use_high_accuracy_detection → true`. The
+     stock file hard-codes `false`, so the classifier only sees the loose
+     map-projected ROI instead of a fine-detector (YOLOX) box.
 7. **Autoware**, per mode (below).
 8. *(classical, unless `--no-auto`)* **post-launch automation**: wait for the
    ADAPI, then `ros2 service call /api/localization/initialize` (an empty
@@ -347,19 +344,21 @@ RViz deliberately runs **outside** the stack launch (`rviz:=false`): with
 `DISPLAY` passthrough) or a local `rviz2` in source mode, on a copy of the
 stock `autoware.rviz` adapted for CARLA (`<log-dir>/dds/autoware_carla.rviz`
 in docker mode, `<log-dir>/autoware_carla.rviz` in source mode): the image
-panel shows the front camera `autoware_demo.py` spawns
-(`/sensing/camera/front/image`; the stock panel points at the traffic-light
-debug overlay, whose module the CARLA overrides switch off), and the initial
-view is the saved `ThirdPersonFollower` on `base_link` rather than the stock
+panel keeps the stock traffic-light recognition overlay
+(`/perception/traffic_light_recognition/traffic_light/debug/rois`), and the
+initial view is the saved `ThirdPersonFollower` on `base_link` rather than the stock
 top-down view on the `viewer` frame, which `map_tf_generator` pins to the
 point-cloud map's centroid and which therefore never follows the ego.
-`--rviz-image-topic T` changes the panel's topic.
+`--rviz-image-topic T` changes the panel's topic (e.g. the front camera
+`autoware_demo.py` spawns, `/sensing/camera/front/image`).
 
 Autoware localizes with **NDT matching against `pointcloud_map.pcd`** and
 therefore needs lidar, IMU and GNSS — all provided by `autoware_demo.py`:
 an XYZIRCAEDT lidar on `/sensing/lidar/top/pointcloud_raw_ex` (frame
 `velodyne_top`), IMU on `/sensing/imu/tamagawa/imu_raw`, GNSS pose on
-`/sensing/gnss`, plus a traffic-light camera. The automation initializes
+`/sensing/gnss`, plus a traffic-light camera (the run script relays its
+`/sensing/camera/traffic_light/image` to the `image_raw` topic Autoware's
+traffic-light recognition subscribes). The automation initializes
 localization from GNSS for you; without `--goal`, set a goal in RViz and
 engage via
 `ros2 service call /api/operation_mode/change_to_autonomous autoware_adapi_v1_msgs/srv/ChangeOperationMode {}`

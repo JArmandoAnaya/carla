@@ -286,17 +286,20 @@ def generate_traffic_light_camera_blueprint(blueprint_library):
 
     The following assumptions were made based on the configuration in AWSIM:
     - 10 Hz publish frequency
-    - 1920 x 1080 image resolution
-    - 90 deg horizontal field of view"""
+    - 1920 x 1080 image resolution"""
 
     blueprint = blueprint_library.find("sensor.camera.rgb")
 
-    blueprint.set_attribute("fov", "90.0")
+    blueprint.set_attribute("fov", "73.0")
     blueprint.set_attribute("image_size_x", "1920")
     blueprint.set_attribute("image_size_y", "1080")
     blueprint.set_attribute("sensor_tick", "0.1")
+    # "tl_exposure_a2" is "Default" with AutoExposureBias lowered from 1.2 to -0.4. Under
+    # direct sun, "Default" saturated some lamps (~33% clipped pixels) and the YOLOX fine
+    # detector found them in 0-2% of frames; this profile gave 0% clipping, 93-100%
+    # red/green detection and correct lamp colors, with no loss at low sun or at night.
     if blueprint.has_attribute("post_process_profile"):
-        blueprint.set_attribute("post_process_profile", "autoware_demo")
+        blueprint.set_attribute("post_process_profile", "tl_exposure_a2")
 
     # ROS settings
     blueprint.set_attribute("ros_name", "traffic_light_left_camera/camera_optical_link")  # frame_id

@@ -160,8 +160,10 @@ Usage: $(basename "$0") --mode classical|e2e [options]
                          .so vs any of this tree's built wheels) -- use
                          only when you knowingly run a wheel from elsewhere
   --rviz-image-topic T   image topic for RViz's image panel (default: classical
-                         /sensing/camera/front/image from autoware_demo.py's front
-                         camera, e2e /sensing/camera/CAM_FRONT/image_raw/image)
+                         the traffic-light recognition overlay
+                         /perception/traffic_light_recognition/traffic_light/debug/rois,
+                         e2e /sensing/camera/CAM_FRONT/image_raw/image; the
+                         autoware_demo.py front camera is /sensing/camera/front/image)
   --with-rviz            also start RViz (docker stack: separate container with
                          DISPLAY passthrough; source stack: local rviz2)
   --log-dir DIR          per-process logs + pidfile (default: <this dir>/logs)
@@ -529,11 +531,15 @@ EOF
 #      2026-08). These ADAPI topics publish at a low rate; at sub-realtime sim
 #      speed the stock 3.0 s staleness window flaps ERROR and the MRM pulses
 #      EMERGENCY_STOP, freezing the car mid-drive for no real reason.
+#   4. autoware_launch e2e_simulator.launch.xml:
+#      traffic_light_recognition/use_high_accuracy_detection -> true. The stock
+#      file hard-codes false without exposing an argument, so the classifier
+#      only gets the loose map-projected ROI, never a fine-detector box.
 OVERRIDE_SCRIPT="$LOG_DIR/apply_carla_overrides.sh"
 
 write_override_script() {
     if $DRY_RUN; then
-        echo "[dry-run] write $OVERRIDE_SCRIPT (NDT convergence likelihood -> 1.0; stop_check_enabled -> false; ADAPI diag timeouts -> 30.0; idempotent)"
+        echo "[dry-run] write $OVERRIDE_SCRIPT (NDT convergence likelihood -> 1.0; stop_check_enabled -> false; ADAPI diag timeouts -> 30.0; traffic-light high-accuracy detection -> true; idempotent)"
         return 0
     fi
     # A generated file (fed to bash via stdin / docker exec -i) sidesteps the
@@ -581,6 +587,13 @@ print(f"patched: {path} (ADAPI diag timeouts -> 30.0)")
 PYEOF
 else
     echo "WARNING: diagnostics/autoware-carla.yaml not found under $root (older autoware_launch? MRM may flap at sub-realtime speed)" >&2
+fi
+e2e="$(find -L "$root" -path '*autoware_launch*' -name e2e_simulator.launch.xml 2>/dev/null | head -1)"
+if [ -n "$e2e" ]; then
+    sed -E -i --follow-symlinks 's|(name="traffic_light_recognition/use_high_accuracy_detection"[[:space:]]+value=")false(")|\1true\2|' "$e2e"
+    echo "patched: $e2e (use_high_accuracy_detection -> true)"
+else
+    echo "WARNING: e2e_simulator.launch.xml not found under $root" >&2
 fi
 EOF
 }
@@ -941,11 +954,6 @@ fi
 start_proc autoware_demo "exec '$CARLA_PY' '$AUTOWARE_DEMO' --host $CARLA_HOST --port $RPC_PORT --hz_rate 20 --resync${SPAWN_INDEX:+ --spawn_index $SPAWN_INDEX}"
 pause 5 "let autoware_demo.py spawn the ego before attaching more sensors"
 
-if [[ "$MODE" == "classical" ]]; then
-    start_proc traffic_light_state_source "exec '$CARLA_PY' '$SCRIPT_DIR/carla_traffic_light_state_source.py' --host '$CARLA_HOST' --port '$RPC_PORT' --map '$MAP_PATH/lanelet2_map.osm' --output '$DDS_DIR/traffic_light_states.json'"
-    check_alive traffic_light_state_source
-fi
-
 # ------------------------------------------------- 4+5. e2e-only glue procs --
 if [[ "$MODE" == "e2e" ]]; then
     # Six VAD cameras (1600x900, nuScenes-style rig) on /sensing/camera/CAM_*/image_raw.
@@ -976,7 +984,9 @@ fi
 # EMERGENCY_STOP -- the car freezes mid-drive with nothing actually wrong.
 # launch_simulator_interface:=false because this branch's simulator publishes
 # the vehicle/sensor topics natively (no external interface node needed).
-LAUNCH_ARGS="vehicle_model:=sample_vehicle sensor_model:=awsim_sensor_kit perception_mode:=lidar rviz:=false simulator_type:=carla launch_simulator_interface:=false"
+# use_high_accuracy_detection only takes effect where autoware_launch declares
+# it; otherwise override 4 above sets it.
+LAUNCH_ARGS="vehicle_model:=sample_vehicle sensor_model:=awsim_sensor_kit perception_mode:=lidar rviz:=false simulator_type:=carla launch_simulator_interface:=false traffic_light_recognition/use_high_accuracy_detection:=true"
 CLASSICAL_SRC_CMD="${STACK_PRELUDE}exec ros2 launch autoware_launch e2e_simulator.launch.xml $LAUNCH_ARGS map_path:='$MAP_PATH'"
 # simulator_type:=carla + launch_simulator_interface:=false for the same
 # reasons as classical (CARLA diag profile; native topics need no interface
@@ -987,23 +997,26 @@ CLASSICAL_SRC_CMD="${STACK_PRELUDE}exec ros2 launch autoware_launch e2e_simulato
 # in e2e mode (no perception stack) -- the panel stays black. Generate a copy
 # repointed at the raw front VAD camera. Best-effort: if the ws config or the
 # expected topic line is missing, fall back to the stock config.
-# The same applies to classical mode on CARLA: the traffic-light module is
-# switched off by the CARLA overrides, so the panel is repointed at the
-# front camera autoware_demo.py spawns for exactly this purpose
-# (/sensing/camera/front/image). Override with --rviz-image-topic.
+# Classical mode keeps the stock traffic-light overlay. Override with
+# --rviz-image-topic (e.g. the front camera, /sensing/camera/front/image).
+TL_ROIS_TOPIC="/perception/traffic_light_recognition/traffic_light/debug/rois"
 if [[ -z "$RVIZ_IMAGE_TOPIC" ]]; then
     if [[ "$MODE" == "e2e" ]]; then RVIZ_IMAGE_TOPIC="/sensing/camera/CAM_FRONT/image_raw/image"
-    else RVIZ_IMAGE_TOPIC="/sensing/camera/front/image"; fi
+    else RVIZ_IMAGE_TOPIC="$TL_ROIS_TOPIC"; fi
 fi
 # make_carla_rviz <stock autoware.rviz> <output>: 0 on success, 1 if the stock
 # config lacks the expected image panel (caller falls back to the stock file).
 make_carla_rviz() {
     local stock="$1" out="$2"
     [[ -f "$stock" ]] || return 1
-    grep -q 'Value: /perception/traffic_light_recognition/traffic_light/debug/rois' "$stock" || return 1
-    sed -e "s|Value: /perception/traffic_light_recognition/traffic_light/debug/rois|Value: $RVIZ_IMAGE_TOPIC|" \
-        -e 's|Name: RecognitionResultOnImage|Name: FrontCamera|' \
-        "$stock" > "$out"
+    grep -q "Value: $TL_ROIS_TOPIC" "$stock" || return 1
+    if [[ "$RVIZ_IMAGE_TOPIC" == "$TL_ROIS_TOPIC" ]]; then
+        cp "$stock" "$out"
+    else
+        sed -e "s|Value: $TL_ROIS_TOPIC|Value: $RVIZ_IMAGE_TOPIC|" \
+            -e 's|Name: RecognitionResultOnImage|Name: FrontCamera|' \
+            "$stock" > "$out"
+    fi
     # The stock current view is a TopDownOrtho on the 'viewer' frame, which
     # map_tf_generator pins to the point-cloud map's centroid -- it never
     # follows the ego, so a drive leaves the screen. Start on the saved
@@ -1050,7 +1063,6 @@ if [[ "$MODE" == "classical" ]]; then
             -e ROS_DOMAIN_ID="$DOMAIN_ID" \
             -v "$DDS_DIR":/dds:ro \
             -v "$MAP_PATH":"/maps/$TOWN_BASE":ro \
-            -v "$SCRIPT_DIR/autoware_traffic_light_state_publisher.py":/carla-autoware-run/autoware_traffic_light_state_publisher.py:ro \
             -v "$HOME/autoware_data":/root/autoware_data \
             --entrypoint bash "$IMAGE" -c 'sleep infinity'
         apply_carla_overrides docker /opt/autoware
@@ -1067,15 +1079,15 @@ if [[ "$MODE" == "classical" ]]; then
             if have xhost && [[ -n "${DISPLAY:-}" ]] && ! $DRY_RUN; then
                 xhost +local: >/dev/null 2>&1 || warn "xhost +local: failed -- rviz may not reach the X display"
             fi
-            # Image panel -> front camera: the stock config lives in the image,
+            # CARLA rviz config: the stock one lives in the image,
             # so copy it out of the stack container into the /dds mount.
             RVIZ_DOCKER_CFG="/opt/autoware/autoware_launch/share/autoware_launch/rviz/autoware.rviz"
             if ! $DRY_RUN && docker cp "$CONTAINER_NAME:$RVIZ_DOCKER_CFG" "$DDS_DIR/autoware_stock.rviz" 2>/dev/null \
                     && make_carla_rviz "$DDS_DIR/autoware_stock.rviz" "$DDS_DIR/autoware_carla.rviz"; then
                 RVIZ_DOCKER_CFG="/dds/autoware_carla.rviz"
-                log "rviz: image panel repointed to $RVIZ_IMAGE_TOPIC ($DDS_DIR/autoware_carla.rviz)"
+                log "rviz: image panel on $RVIZ_IMAGE_TOPIC ($DDS_DIR/autoware_carla.rviz)"
             else
-                warn "could not generate the rviz config with the front camera panel -- using the stock autoware.rviz (image panel will be black)"
+                warn "could not generate the CARLA rviz config -- using the stock autoware.rviz"
             fi
             start_container "$CONTAINER_NAME-rviz" \
                 --network host "${GPU_ARGS[@]}" "${RVIZ_GPU_ENV[@]}" \
@@ -1106,22 +1118,21 @@ if [[ "$MODE" == "classical" ]]; then
             RVIZ_CFG="$(find "$AUTOWARE_WS/install" -path '*autoware_launch*' -name autoware.rviz 2>/dev/null | head -1)"
             if make_carla_rviz "$RVIZ_CFG" "$LOG_DIR/autoware_carla.rviz"; then
                 RVIZ_CFG="$LOG_DIR/autoware_carla.rviz"
-                log "rviz: image panel repointed to $RVIZ_IMAGE_TOPIC ($RVIZ_CFG)"
+                log "rviz: image panel on $RVIZ_IMAGE_TOPIC ($RVIZ_CFG)"
             fi
             start_proc rviz "${STACK_PRELUDE}exec env ${RVIZ_ENV}rviz2 ${RVIZ_CFG:+-d '$RVIZ_CFG'}"
         fi
     fi
 
-    # The stock vision model reports UNKNOWN for CARLA's rendered lights. Do
-    # not feed that classifier in this ground-truth-driven demo: its cached
-    # UNKNOWN would be merged with the authoritative external state. CARLA's
-    # native traffic-light camera remains available on <base>/image.
+    # CARLA publishes the traffic-light camera on <base>/image; Autoware's
+    # traffic-light recognition subscribes <base>/image_raw.
+    TL_RELAY_CMD="exec ros2 run topic_tools relay /sensing/camera/traffic_light/image /sensing/camera/traffic_light/image_raw"
     if [[ "$STACK" == "docker" ]]; then
-        start_proc traffic_light_state_publisher "exec docker exec '$CONTAINER_NAME' bash -c '$AW_SETUP_SNIPPET; exec python3 /carla-autoware-run/autoware_traffic_light_state_publisher.py --input /dds/traffic_light_states.json'"
+        start_proc traffic_light_camera_relay "exec docker exec '$CONTAINER_NAME' bash -c '$AW_SETUP_SNIPPET; $TL_RELAY_CMD'"
     else
-        start_proc traffic_light_state_publisher "${STACK_PRELUDE}exec python3 '$SCRIPT_DIR/autoware_traffic_light_state_publisher.py' --input '$DDS_DIR/traffic_light_states.json'"
+        start_proc traffic_light_camera_relay "${STACK_PRELUDE}$TL_RELAY_CMD"
     fi
-    check_alive traffic_light_state_publisher
+    check_alive traffic_light_camera_relay
 else
     if [[ "$E2E_GLUE" == "pr1685" ]]; then
         start_proc autoware "$E2E_PR_CMD"

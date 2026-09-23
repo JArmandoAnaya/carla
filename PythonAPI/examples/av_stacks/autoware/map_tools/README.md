@@ -61,7 +61,7 @@ The driver orchestrates:
 | Tool | Purpose |
 |---|---|
 | `generate_pointcloud_map.py` | ground-truth lidar sweep over the waypoint graph → voxelized binary PCD |
-| `generate_lanelet2_map.py` | OpenDRIVE → lanelet2 (crdesigner), + ground-truth traffic-light regulatory elements when live (not yet consumable by Autoware's TL pipeline — the run script disables the TL module) |
+| `generate_lanelet2_map.py` | OpenDRIVE → lanelet2 (crdesigner), + ground-truth traffic-light regulatory elements when live |
 | `write_projector_info.py` | `map_projector_info.yaml` (Local; MGRS/UTM options for digital twins) |
 | `fetch_prebuilt_maps.sh` | download + arrange the prebuilt pair |
 | `pcd_io.py` | numpy-only PCD write/read + voxel downsample (no open3d) |
